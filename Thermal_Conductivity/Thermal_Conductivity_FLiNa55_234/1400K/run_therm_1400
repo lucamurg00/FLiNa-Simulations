@@ -1,0 +1,77 @@
+# lmp -in therm.lammps
+# Muller-Plathe method via fix thermal_conductivity
+
+# conda activate nequip_cuda10.1
+# export CUDA_VISIBLE_DEVICES=2
+#   lmp -in run_therm_1400
+# nohup lmp -in run_therm_1400 > therm_1400_job.out &
+#job =8154
+# 1) Initialization
+units metal
+dimension 3
+newton off on
+atom_style atomic
+boundary p p p
+
+
+
+# 2) System definition
+read_data	Therm_1400_restartpoint.lammps
+
+# 3) Simulation settings
+pair_style	nequip
+pair_coeff	* * FLiNa_f_pyt10.2 F Li Na #Li F Na
+
+# 4) NPT:
+thermo 1
+minimize 1.00e-9 1.0e-9 1000 10000000
+
+
+timestep .001 # fetmoseconds
+variable Tsim equal 1400 # Kelvin
+velocity all create ${Tsim} 12335 
+
+#-------------------------------------------
+# 1st equilibration run
+fix 1 all nvt temp ${Tsim} ${Tsim} $(100.0*dt)
+thermo          100
+reset_timestep 0
+run 50000
+
+velocity        all scale ${Tsim}
+unfix           1
+
+#-----------------------------------------
+# 2nd equilibration run
+compute         ke all ke/atom
+variable        temp atom c_ke/1.5
+
+fix             1 all nve
+
+compute         layers all chunk/atom bin/1d z lower 0.05 units reduced # <--- delta z ?
+fix             2 all ave/chunk 10 100 1000 layers v_temp file profile.mp # <--- use every 10 steps, 100 times, repeat every 1000 steps
+fix             3 all thermal/conductivity 10 z 20 # <--- perform kintic energy swap every 10 steps, using 20 bins
+
+variable        tdiff equal f_2[11][3]-f_2[1][3]
+thermo_style    custom step temp epair etotal f_3 v_tdiff
+thermo          1000
+#thermo_modify   colname f_3 E_delta colname v_tdiff dTemp_step
+
+
+run 200000
+
+#------------------------------------------
+# thermal conductivity calculation
+fix             3 all thermal/conductivity 10 z 20
+
+variable start_time equal time
+variable kappa equal (f_3/(time-${start_time})/(lx*ly)/2.0)*(lz/2.0)/f_ave
+
+fix             ave all ave/time 1 1 1000 v_tdiff ave running
+thermo_style    custom step temp epair etotal f_3 v_tdiff f_ave
+
+run 200000
+print           "Running average thermal conductivity: $(v_kappa:%.2f)"
+
+write_data	Therm_${Tsim}_restartpoint.lammps
+
