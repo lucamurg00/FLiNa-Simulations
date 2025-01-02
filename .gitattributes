@@ -1,0 +1,1 @@
+NequIP_Training/DFT_training_data.npz filter=lfs diff=lfs merge=lfs -text
